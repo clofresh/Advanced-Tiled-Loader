@@ -27,6 +27,7 @@ local TileLayer = require(TILED_LOADER_PATH .. "TileLayer")
 local Tile = require(TILED_LOADER_PATH .. "Tile")
 local Object = require(TILED_LOADER_PATH .. "Object")
 local ObjectLayer = require(TILED_LOADER_PATH .. "ObjectLayer")
+local ImageLayer = require(TILED_LOADER_PATH .. "ImageLayer")
 
 local Loader = {
     path = "",                      -- The path to tmx files.
@@ -187,7 +188,7 @@ function Loader._expandMap(name, t)
            "Loader._expandMap - Map data is corrupt")
 
     -- We'll use these for temporary storage
-    local map, tileset, tilelayer, objectlayer, props
+    local map, tileset, tilelayer, objectlayer, imagelayer, props
     local props = {}
     
     -- Get the properties
@@ -238,6 +239,13 @@ function Loader._expandMap(name, t)
                     map(v.xarg.name).data = v2[1]
                 end
             end
+
+        -- Process CustomLayer
+        elseif v.label == "imagelayer" then
+            imagelayer = Loader._expandImageLayer(v, map)
+            map.layers[imagelayer.name] = imagelayer
+            map.layerOrder[#map.layerOrder + 1] = imagelayer
+
         end
         
     end
@@ -505,6 +513,63 @@ function Loader._expandObjectLayer(t, map)
     -- Set the visibility
     layer.visible = not (t.xarg.visible == "0")
     
+    -- Return the layer
+    return layer
+end
+
+----------------------------------------------------------------------------------------------------
+-- Process ImageLayer from xml table
+function Loader._expandImageLayer(t, map)
+
+    -- Do some checking
+    Loader._checkXML(t)
+    if t.label ~= "imagelayer" then
+        error("Loader._expandImageLayer - Passed table is not ImageLayer data")
+    end
+
+    -- Process elements
+    local prop, obj, image, imagePath
+    for _, v in ipairs(t) do
+
+        -- Process image
+        if v.label == "image" then
+            imagePath = v.xarg.source
+            path = directoryUp(map._directory .. v.xarg.source)
+            -- If the image is in the cache then load it
+            if cache[path] then
+                image = cache[path]
+                imageWidth = cache_imagesize[image].width
+                imageHeight = cache_imagesize[image].height
+            -- Else load it and store in the cache
+            else
+                image = love.image.newImageData(path)
+                -- transparent color
+                if v.xarg.trans then
+                    trans = { tonumber( "0x" .. v.xarg.trans:sub(1,2) ),
+                              tonumber( "0x" .. v.xarg.trans:sub(3,4) ),
+                              tonumber( "0x" .. v.xarg.trans:sub(5,6) )}
+                    image:mapPixel( function(x,y,r,g,b,a)
+                    return r,g,b, (trans[1] == r and trans[2] == g and trans[3] ==b and 0) or a  end
+                    )
+                end
+                -- Set the image information
+                image, imageWidth, imageHeight = Loader._newImage(image)
+                image:setFilter(Loader.filterMin, Loader.filterMag)
+                -- Cache the created image
+                cache[path] = image
+                cache_imagesize[image] = {width = imageWidth, height = imageHeight}
+            end
+
+        -- Process properties
+        elseif v.label == "properties" then
+            prop = Loader._expandProperties(v)
+        end
+
+    end
+
+    -- Create a new layer
+    local layer = ImageLayer:new(Loader._checkName(map.layers, t.xarg.name), image, prop or {}, not (t.xarg.visible == "0"))
+
     -- Return the layer
     return layer
 end
